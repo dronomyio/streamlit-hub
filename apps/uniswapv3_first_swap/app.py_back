@@ -1,0 +1,254 @@
+## `app.py` (the Streamlit app)
+
+import math
+import numpy as np
+import streamlit as st
+
+Q96 = 2**96
+
+
+# --------- Math helpers (single-range swap model) ----------
+
+def sqrtp_to_price(sqrtp_x96: int) -> float:
+    """price = (sqrtP / Q96)^2"""
+    s = sqrtp_x96 / Q96
+    return s * s
+
+
+def price_to_tick(price: float) -> int:
+    """
+    Uniswap V3 tick is log_{1.0001}(price).
+    This is the common approximation for educational use.
+    """
+    if price <= 0:
+        return 0
+    return int(math.floor(math.log(price) / math.log(1.0001)))
+
+
+def tick_to_price(tick: int) -> float:
+    return 1.0001 ** tick
+
+
+def tick_to_sqrtp_x96(tick: int) -> int:
+    """sqrtP = sqrt(price) * Q96"""
+    p = tick_to_price(tick)
+    return int(math.sqrt(p) * Q96)
+
+
+def calc_amount1(L: int, sqrtp_b_x96: int, sqrtp_a_x96: int) -> int:
+    """
+    amount1 = L * (sqrtP_b - sqrtP_a) / Q96
+    Matches the book form y = L*(p_b - p_a) with p as sqrt price.
+    """
+    if sqrtp_b_x96 < sqrtp_a_x96:
+        sqrtp_b_x96, sqrtp_a_x96 = sqrtp_a_x96, sqrtp_b_x96
+    return (L * (sqrtp_b_x96 - sqrtp_a_x96)) // Q96
+
+
+def calc_amount0(L: int, sqrtp_b_x96: int, sqrtp_a_x96: int) -> int:
+    """
+    amount0 = L * (sqrtP_b - sqrtP_a) / (sqrtP_b * sqrtP_a) * Q96
+    Matches the book form x = L*(p_b - p_a)/(p_b*p_a) with p as sqrt price.
+    """
+    if sqrtp_b_x96 < sqrtp_a_x96:
+        sqrtp_b_x96, sqrtp_a_x96 = sqrtp_a_x96, sqrtp_b_x96
+    num = L * (sqrtp_b_x96 - sqrtp_a_x96) * Q96
+    den = sqrtp_b_x96 * sqrtp_a_x96
+    return num // den
+
+
+def swap_token1_in_for_token0_out(L: int, sqrtp_cur_x96: int, amount1_in: int):
+    """
+    "First swap" (single active range, token1 in, token0 out):
+    ΔsqrtP = (amount1_in * Q96) / L
+    sqrtP_next = sqrtP_cur + ΔsqrtP
+    amount1_used = amount1_in
+    amount0_out = calc_amount0(L, sqrtP_next, sqrtP_cur)  (pool gives token0 out)
+    """
+    if L <= 0:
+        raise ValueError("Liquidity L must be > 0")
+    if amount1_in < 0:
+        raise ValueError("amount1_in must be >= 0")
+
+    d_sqrtp = (amount1_in * Q96) // L
+    sqrtp_next = sqrtp_cur_x96 + d_sqrtp
+
+    amount0_out = calc_amount0(L, sqrtp_next, sqrtp_cur_x96)
+    return sqrtp_next, amount0_out
+
+
+# --------- UI ----------
+
+st.set_page_config(page_title="Uniswap V3 First Swap (Interactive)", layout="wide")
+st.title("Uniswap V3 “First Swap” — Single Range Simulator")
+
+st.markdown(
+    """
+This app demonstrates the **Milestone 1 / First Swap** idea: within one active price range,
+a swap **moves `sqrtP` and tick**, while **liquidity `L` stays constant**. :contentReference[oaicite:1]{index=1}
+"""
+)
+
+with st.sidebar:
+    st.header("Scenario")
+    preset = st.selectbox(
+        "Choose preset",
+        [
+            "Book-like (42 token1 in, big L, sqrtP around ~5000 price)",
+            "Tiny pool (small L) — big price impact",
+            "Huge pool (large L) — tiny price impact",
+            "Custom",
+        ],
+    )
+
+    # Defaults inspired by the page you linked (values appear on that page)
+    # liquidity and sqrtP numbers shown there are large (Q96 fixed-point style).
+    if preset == "Book-like (42 token1 in, big L, sqrtP around ~5000 price)":
+        L_default = 1517882343751509868544
+        sqrtp_default = 5602277097478614198912276234240
+        amount1_in_default = 42 * 10**18  # treat as 18-decimal "wei-like" units
+        lower_tick_default, upper_tick_default = 84222, 86129
+    elif preset == "Tiny pool (small L) — big price impact":
+        L_default = 10**20
+        sqrtp_default = int(math.sqrt(2000.0) * Q96)
+        amount1_in_default = 42 * 10**18
+        lower_tick_default, upper_tick_default = price_to_tick(1500.0), price_to_tick(2600.0)
+    elif preset == "Huge pool (large L) — tiny price impact":
+        L_default = 10**27
+        sqrtp_default = int(math.sqrt(5000.0) * Q96)
+        amount1_in_default = 42 * 10**18
+        lower_tick_default, upper_tick_default = price_to_tick(4500.0), price_to_tick(5600.0)
+    else:
+        L_default = 10**24
+        sqrtp_default = int(math.sqrt(5000.0) * Q96)
+        amount1_in_default = 42 * 10**18
+        lower_tick_default, upper_tick_default = price_to_tick(4500.0), price_to_tick(5600.0)
+
+    st.subheader("Pool parameters (Q96-style under the hood)")
+    L = st.number_input("Liquidity L (integer)", min_value=1, value=int(L_default), step=1)
+    sqrtp_cur_x96 = st.number_input("Current sqrtP (X96 integer)", min_value=1, value=int(sqrtp_default), step=1)
+
+    st.subheader("Range (ticks)")
+    lower_tick = st.number_input("Lower tick", value=int(lower_tick_default), step=1)
+    upper_tick = st.number_input("Upper tick", value=int(upper_tick_default), step=1)
+    if lower_tick >= upper_tick:
+        st.error("Lower tick must be < upper tick.")
+
+    st.subheader("Swap input")
+    amount1_in = st.number_input("amount1_in (token1, 18 decimals)", min_value=0, value=int(amount1_in_default), step=10**16)
+    token1_decimals = st.selectbox("Token1 display decimals", [6, 18], index=1)
+    token0_decimals = st.selectbox("Token0 display decimals", [18, 6], index=0)
+
+    do_clamp = st.checkbox("Clamp swap to stay inside tick range (educational)", value=True)
+
+# Compute current state
+price_cur = sqrtp_to_price(int(sqrtp_cur_x96))
+tick_cur = price_to_tick(price_cur)
+
+sqrtp_lower = tick_to_sqrtp_x96(int(lower_tick))
+sqrtp_upper = tick_to_sqrtp_x96(int(upper_tick))
+
+# Perform swap
+sqrtp_next, amount0_out = swap_token1_in_for_token0_out(int(L), int(sqrtp_cur_x96), int(amount1_in))
+
+clamped = False
+if do_clamp:
+    if sqrtp_next < sqrtp_lower:
+        sqrtp_next = sqrtp_lower
+        clamped = True
+    if sqrtp_next > sqrtp_upper:
+        sqrtp_next = sqrtp_upper
+        clamped = True
+    # recompute output for clamped next price
+    amount0_out = calc_amount0(int(L), int(sqrtp_next), int(sqrtp_cur_x96))
+
+price_next = sqrtp_to_price(int(sqrtp_next))
+tick_next = price_to_tick(price_next)
+
+# amount1 actually used in this simple model = amount1_in unless clamped
+# If clamped, compute the implied amount1 that would move sqrtP to the boundary:
+if clamped:
+    implied_amount1 = calc_amount1(int(L), int(sqrtp_next), int(sqrtp_cur_x96))
+else:
+    implied_amount1 = int(amount1_in)
+
+# Display formatting helpers
+def to_units(x: int, decimals: int) -> float:
+    return x / (10**decimals)
+
+colA, colB = st.columns([1, 1])
+
+with colA:
+    st.subheader("Pool state")
+    st.write(f"**Current price:** {price_cur:,.6f}")
+    st.write(f"**Current tick:** {tick_cur:,}")
+    st.write(f"**Current sqrtP (X96):** {int(sqrtp_cur_x96):,}")
+    st.write(f"**Liquidity L:** {int(L):,}")
+
+    st.markdown("---")
+    st.subheader("Range")
+    st.write(f"**Lower tick:** {int(lower_tick):,}  → price ≈ {tick_to_price(int(lower_tick)):,.6f}")
+    st.write(f"**Upper tick:** {int(upper_tick):,}  → price ≈ {tick_to_price(int(upper_tick)):,.6f}")
+    if not (sqrtp_lower <= int(sqrtp_cur_x96) <= sqrtp_upper):
+        st.warning("Current sqrtP is outside the provided tick range (that’s unusual for a single-active-range demo).")
+
+with colB:
+    st.subheader("Swap result (token1 in → token0 out)")
+    st.write(f"**Target sqrtP (X96):** {int(sqrtp_next):,}")
+    st.write(f"**New price:** {price_next:,.6f}")
+    st.write(f"**New tick:** {tick_next:,}")
+
+    if clamped:
+        st.info("Swap was **clamped** to stay within the range; the implied amount-in is shown below.")
+
+    st.markdown("#### Amounts")
+    st.write(
+        f"**Token1 in (used):** {to_units(implied_amount1, token1_decimals):,.12f} "
+        f"(raw: {implied_amount1:,})"
+    )
+    st.write(
+        f"**Token0 out:** {to_units(amount0_out, token0_decimals):,.12f} "
+        f"(raw: {amount0_out:,})"
+    )
+
+    st.caption(
+        "Within one range, L stays constant; sqrtP moves by ΔsqrtP ≈ (amount1_in·Q96)/L (token1-in case)."
+    )
+
+st.markdown("---")
+
+# --------- Visualization: price movement along the range ----------
+st.subheader("Interactive visualization")
+
+# build a simple curve of ticks in the chosen range
+ticks = np.linspace(int(lower_tick), int(upper_tick), num=200, dtype=int)
+prices = np.array([tick_to_price(int(t)) for t in ticks], dtype=float)
+
+# mark current and next
+st.write("The chart below shows the price range (by tick) and your current/next price positions.")
+
+# Streamlit line_chart expects a series; we’ll show price vs index and print markers as text.
+st.line_chart(prices)
+
+# Find approximate indices for markers
+def nearest_index(arr, value):
+    return int(np.argmin(np.abs(arr - value)))
+
+i_cur = nearest_index(prices, price_cur)
+i_next = nearest_index(prices, price_next)
+
+st.write(f"**Marker (approx):** current at index {i_cur} (~tick {ticks[i_cur]}), next at index {i_next} (~tick {ticks[i_next]})")
+
+st.markdown(
+    """
+### What this demonstrates (in plain terms)
+- You choose an input amount (`token1 in`, e.g., 42 USDC), and that pushes the pool **up the curve** (price changes). :contentReference[oaicite:2]{index=2}  
+- While you stay within a single tick range, **liquidity `L` does not change** (that’s the key “first swap” simplification). :contentReference[oaicite:3]{index=3}  
+- The pool computes the output (`token0 out`, e.g., ETH out) from the **sqrt price movement** and **L**. :contentReference[oaicite:4]{index=4}  
+
+### Try these quick experiments
+1) **Increase `amount1_in`** → bigger ΔsqrtP → larger tick jump → more price impact  
+2) **Increase `L` by 10×** → ΔsqrtP shrinks → almost no price movement  
+3) **Narrow the tick range** and turn off clamping → you’ll see how easily you can “hit the boundary” (which foreshadows cross-tick swaps later)
+"""
+)

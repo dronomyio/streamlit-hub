@@ -12,6 +12,7 @@ services:
       - caddy_config:/config
     depends_on:
       - uniswapv3
+      - uniswapv3_first_swap
       - demo2
 
   uniswapv3:
@@ -24,6 +25,17 @@ services:
       - APP_FILE=app.py
     volumes:
       - ./apps/uniswapv3:/app:ro
+
+  uniswapv3_first_swap:
+    build:
+      context: ./base
+    container_name: streamlit-uniswapv3_first_swap
+    restart: unless-stopped
+    environment:
+      - APP_NAME=uniswapv3_first_swap
+      - APP_FILE=app.py
+    volumes:
+      - ./apps/uniswapv3_first_swap:/app:ro
 
   demo2:
     build:
