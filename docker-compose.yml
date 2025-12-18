@@ -13,6 +13,7 @@ services:
     depends_on:
       - uniswapv3
       - uniswapv3_first_swap
+      - uniswapv3_manager_contract
       - demo2
 
   uniswapv3:
@@ -36,6 +37,17 @@ services:
       - APP_FILE=app.py
     volumes:
       - ./apps/uniswapv3_first_swap:/app:ro
+
+  uniswapv3_manager_contract:
+    build:
+      context: ./base
+    container_name: streamlit-uniswapv3_manager_contract
+    restart: unless-stopped
+    environment:
+      - APP_NAME=uniswapv3_manager_contract
+      - APP_FILE=app.py
+    volumes:
+      - ./apps/uniswapv3_manager_contract:/app:ro
 
   demo2:
     build:

@@ -6,6 +6,7 @@ respond / "Streamlit Hub is running. Apps: /app/uniswapv3/ , /app/demo2/" 200
 redir /app/demo2 /app/demo2/ 308
 redir /app/uniswapv3 /app/uniswapv3/ 308
 redir /app/uniswapv3_first_swap /app/uniswapv3_first_swap/ 308
+redir /app/uniswapv3_manager_contract /app/uniswapv3_manager_contract/ 308
 
 # IMPORTANT: use handle (NOT handle_path) because Streamlit is mounted at /app/...
 handle /app/uniswapv3/* {
@@ -24,6 +25,13 @@ handle /app/demo2/* {
 
 handle /app/uniswapv3_first_swap/* {
   reverse_proxy streamlit-uniswapv3_first_swap:8501 {
+    lb_try_duration 30s
+    lb_try_interval 500ms
+  }
+}
+
+handle /app/uniswapv3_manager_contract/* {
+  reverse_proxy streamlit-uniswapv3_manager_contract:8501 {
     lb_try_duration 30s
     lb_try_interval 500ms
   }
