@@ -1,0 +1,13 @@
+:80
+
+# Optional: simple landing message at /
+respond / "Streamlit Hub is running. Apps: /app/uniswapv3/ , /app/demo2/" 200
+
+handle_path /app/uniswapv3/* {
+  reverse_proxy uniswapv3:8501
+}
+
+handle_path /app/demo2/* {
+  reverse_proxy demo2:8501
+}
+

@@ -1,0 +1,42 @@
+services:
+  caddy:
+    image: caddy:2
+    container_name: streamlit-hub-caddy
+    restart: unless-stopped
+    ports:
+      - "80:80"
+      # - "443:443"   # enable later if you add a domain + TLS
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy_data:/data
+      - caddy_config:/config
+    depends_on:
+      - uniswapv3
+      - demo2
+
+  uniswapv3:
+    build:
+      context: ./base
+    container_name: streamlit-uniswapv3
+    restart: unless-stopped
+    environment:
+      - APP_NAME=uniswapv3
+      - APP_FILE=app.py
+    volumes:
+      - ./apps/uniswapv3:/app:ro
+
+  demo2:
+    build:
+      context: ./base
+    container_name: streamlit-demo2
+    restart: unless-stopped
+    environment:
+      - APP_NAME=demo2
+      - APP_FILE=app.py
+    volumes:
+      - ./apps/demo2:/app:ro
+
+volumes:
+  caddy_data:
+  caddy_config:
+
